@@ -56,7 +56,7 @@ public class AiExplanationServiceImpl implements AiExplanationService {
             }
         }
 
-        // Fallback context-aware response when API key is not configured or fails
+        // Fallback response when API key is not configured or API call fails
         return generateFallbackExplanation(term, context);
     }
 
@@ -108,18 +108,16 @@ public class AiExplanationServiceImpl implements AiExplanationService {
     }
 
     private ExplanationResponse generateFallbackExplanation(String term, String context) {
-        String definition = String.format("\"%s\" refers to a key term or concept used in this passage.", term);
-        String contextualMeaning = context != null && !context.isEmpty()
-                ? String.format("In this context: \"%s\"", context.length() > 140 ? context.substring(0, 140) + "..." : context)
-                : String.format("Used in the text to clarify the subject being discussed.", term);
-
-        String example = String.format("Example: The author uses \"%s\" in the text.", term);
+        String definition = "AI explanation unavailable (configure OPENAI_API_KEY environment variable to enable live AI definitions).";
+        String contextualMeaning = context != null && !context.trim().isEmpty()
+                ? String.format("Context passage: \"%s\"", context.length() > 140 ? context.substring(0, 140) + "..." : context)
+                : "";
 
         return new ExplanationResponse(
                 term,
                 definition,
                 contextualMeaning,
-                example,
+                "",
                 ""
         );
     }
