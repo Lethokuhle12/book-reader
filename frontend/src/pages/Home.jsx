@@ -30,6 +30,7 @@ const Home = () => {
     const [explainingError, setExplainingError] = useState(null);
     const [manualTermInput, setManualTermInput] = useState("");
     const [showManualExplainBox, setShowManualExplainBox] = useState(false);
+    const [wasSpeakingBeforeExplain, setWasSpeakingBeforeExplain] = useState(false);
 
     // Apply dark mode class to document body
     useEffect(() => {
@@ -121,8 +122,13 @@ const Home = () => {
     const handleExplain = async (term, contextText) => {
         if (!term) return;
 
-        // Auto pause audio when asking for explanation
-        speech.pause();
+        // Check if playback was active before triggering explanation
+        const currentlyPlaying = speech.speaking && !speech.paused;
+        setWasSpeakingBeforeExplain(currentlyPlaying);
+
+        if (currentlyPlaying) {
+            speech.pause();
+        }
 
         setExplainingLoading(true);
         setExplainingError(null);
@@ -257,6 +263,7 @@ const Home = () => {
                     explanation={explanation}
                     loading={explainingLoading}
                     error={explainingError}
+                    wasSpeaking={wasSpeakingBeforeExplain}
                     onClose={() => {
                         setExplanation(null);
                         setExplainingError(null);

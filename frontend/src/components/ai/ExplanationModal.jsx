@@ -1,11 +1,20 @@
 import LoadingSpinner from "../common/LoadingSpinner";
 
-const ExplanationModal = ({ explanation, loading, error, onClose, onResume }) => {
+const ExplanationModal = ({
+    explanation,
+    loading,
+    error,
+    wasSpeaking = false,
+    onClose,
+    onResume,
+}) => {
     if (!explanation && !loading && !error) return null;
 
     const handleContinue = () => {
         onClose();
-        if (onResume) onResume();
+        if (wasSpeaking && onResume) {
+            onResume();
+        }
     };
 
     return (
@@ -68,7 +77,7 @@ const ExplanationModal = ({ explanation, loading, error, onClose, onResume }) =>
 
                 <div className="modal-actions">
                     <button className="control-btn primary continue-btn" onClick={handleContinue}>
-                        ▶ Resume Reading
+                        {wasSpeaking ? "▶ Resume Reading" : "Close Explanation"}
                     </button>
                 </div>
             </div>
