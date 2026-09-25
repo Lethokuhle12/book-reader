@@ -32,6 +32,22 @@ export const getBackendVoices = async () => {
     return [];
 };
 
+export const generateBackendAudio = async ({ text, voice, rate }) => {
+    const response = await fetch(`${API_URL}/audio/generate`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text, voice, rate }),
+    });
+
+    if (!response.ok) {
+        throw new Error("Failed to generate audio from backend");
+    }
+
+    return await response.blob();
+};
+
 export const explainText = async ({ text, context, bookTitle }) => {
     const response = await fetch(`${API_URL}/explain`, {
         method: "POST",

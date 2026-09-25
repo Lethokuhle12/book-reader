@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getBackendVoices } from "../services/api";
+import { getBackendVoices, generateBackendAudio } from "../services/api";
 
 const useSpeech = () => {
     const [speaking, setSpeaking] = useState(false);
@@ -15,6 +15,7 @@ const useSpeech = () => {
     const chunksRef = useRef([]);
     const currentChunkRef = useRef(0);
     const isPausedRef = useRef(false);
+    const audioRef = useRef(null);
 
     // Save selected voice to localStorage
     const handleSetSelectedVoice = (voice) => {
@@ -49,6 +50,7 @@ const useSpeech = () => {
                 displayName: voice.name.replace(/Microsoft |Google |Apple /gi, "").trim(),
                 gender,
                 region,
+                isBackend: false,
             };
         };
 
@@ -58,15 +60,15 @@ const useSpeech = () => {
 
             const combinedVoices = [...browserVoices];
 
-            // Add backend voices if not already present
+            // Add backend voices with explicit provider info
             backendVoices.forEach((bv) => {
                 if (!combinedVoices.some((v) => v.name === bv.name)) {
                     combinedVoices.push({
                         name: bv.name,
-                        displayName: bv.displayName,
+                        displayName: `${bv.displayName || bv.name} [Azure]`,
                         lang: bv.language,
                         gender: bv.gender,
-                        region: bv.region,
+                        region: bv.region || "Azure Neural",
                         isBackend: true,
                         voiceURI: bv.name,
                     });
@@ -112,12 +114,21 @@ const useSpeech = () => {
         }
 
         return () => {
+            stopAudioElement();
             if (window.speechSynthesis) {
                 window.speechSynthesis.cancel();
                 window.speechSynthesis.onvoiceschanged = null;
             }
         };
     }, []);
+
+    const stopAudioElement = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+            audioRef.current = null;
+        }
+    };
 
     const cleanText = (text) => {
         if (!text) return "";
@@ -133,12 +144,11 @@ const useSpeech = () => {
     const splitText = (text) => {
         const cleanedText = cleanText(text);
         if (!cleanedText) return [];
-        // Split text by sentence or chunk (~200 chars)
         const matched = cleanedText.match(/[^.!?]+[.!?]+(\s|$)|.{1,200}(?:\s|$)/g);
         return (matched || [cleanedText]).map((s) => s.trim()).filter(Boolean);
     };
 
-    const speakChunk = () => {
+    const speakChunk = async () => {
         if (currentChunkRef.current >= chunksRef.current.length) {
             setSpeaking(false);
             setPaused(false);
@@ -155,11 +165,53 @@ const useSpeech = () => {
             return;
         }
 
+        stopAudioElement();
         window.speechSynthesis.cancel();
 
+        // Route through Backend Azure TTS if backend voice selected
+        if (selectedVoice && selectedVoice.isBackend) {
+            try {
+                const blob = await generateBackendAudio({
+                    text: chunkText,
+                    voice: selectedVoice.name,
+                    rate,
+                });
+
+                if (blob && blob.size > 0 && !isPausedRef.current) {
+                    const audioUrl = URL.createObjectURL(blob);
+                    const audio = new Audio(audioUrl);
+                    audio.volume = volume;
+
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        if (!isPausedRef.current) {
+                            currentChunkRef.current += 1;
+                            speakChunk();
+                        }
+                    };
+
+                    audio.onerror = (e) => {
+                        console.warn("Backend audio element playback error, falling back to Web Speech:", e);
+                        speakWithBrowserUtterance(chunkText);
+                    };
+
+                    audioRef.current = audio;
+                    await audio.play();
+                    return;
+                }
+            } catch (err) {
+                console.warn("Failed to generate backend audio, falling back to Web Speech:", err);
+            }
+        }
+
+        // Web Speech API fallback / browser voice handling
+        speakWithBrowserUtterance(chunkText);
+    };
+
+    const speakWithBrowserUtterance = (chunkText) => {
         const utterance = new SpeechSynthesisUtterance(chunkText);
 
-        if (selectedVoice) {
+        if (selectedVoice && !selectedVoice.isBackend) {
             utterance.voice = selectedVoice;
         }
         utterance.rate = rate;
@@ -194,6 +246,7 @@ const useSpeech = () => {
     const speak = (text, startFromChunk = 0) => {
         if (!text) return;
 
+        stopAudioElement();
         window.speechSynthesis.cancel();
 
         textRef.current = text;
@@ -214,8 +267,11 @@ const useSpeech = () => {
 
     const pause = () => {
         isPausedRef.current = true;
+        if (audioRef.current) {
+            audioRef.current.pause();
+        }
         window.speechSynthesis.pause();
-        window.speechSynthesis.cancel(); // ensure immediate stop for chunk handling
+        window.speechSynthesis.cancel();
         setPaused(true);
     };
 
@@ -223,11 +279,16 @@ const useSpeech = () => {
         isPausedRef.current = false;
         setPaused(false);
         setSpeaking(true);
-        speakChunk();
+        if (audioRef.current && selectedVoice?.isBackend) {
+            audioRef.current.play().catch(() => speakChunk());
+        } else {
+            speakChunk();
+        }
     };
 
     const stop = () => {
         isPausedRef.current = false;
+        stopAudioElement();
         window.speechSynthesis.cancel();
         setSpeaking(false);
         setPaused(false);
@@ -238,6 +299,7 @@ const useSpeech = () => {
     const changeRate = (newRate) => {
         setRate(newRate);
         if (speaking && !paused) {
+            stopAudioElement();
             window.speechSynthesis.cancel();
             setTimeout(() => {
                 speakChunk();
@@ -248,6 +310,7 @@ const useSpeech = () => {
     const changeVoice = (newVoice) => {
         handleSetSelectedVoice(newVoice);
         if (speaking && !paused) {
+            stopAudioElement();
             window.speechSynthesis.cancel();
             setTimeout(() => {
                 speakChunk();
@@ -257,6 +320,7 @@ const useSpeech = () => {
 
     const skipForward = () => {
         if (chunksRef.current.length === 0) return;
+        stopAudioElement();
         window.speechSynthesis.cancel();
         currentChunkRef.current = Math.min(currentChunkRef.current + 1, chunksRef.current.length - 1);
         setCurrentChunk(currentChunkRef.current);
@@ -267,6 +331,7 @@ const useSpeech = () => {
 
     const skipBackward = () => {
         if (chunksRef.current.length === 0) return;
+        stopAudioElement();
         window.speechSynthesis.cancel();
         currentChunkRef.current = Math.max(currentChunkRef.current - 1, 0);
         setCurrentChunk(currentChunkRef.current);
@@ -277,6 +342,7 @@ const useSpeech = () => {
 
     const jumpToChunk = (index) => {
         if (chunksRef.current.length === 0) return;
+        stopAudioElement();
         window.speechSynthesis.cancel();
         currentChunkRef.current = Math.max(0, Math.min(index, chunksRef.current.length - 1));
         setCurrentChunk(currentChunkRef.current);
